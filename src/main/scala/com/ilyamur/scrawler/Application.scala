@@ -1,7 +1,9 @@
 package com.ilyamur.scrawler
 
+import java.io.{FileOutputStream, InputStream, OutputStream}
 import java.util.concurrent.Executors
 
+import org.apache.commons.io.IOUtils
 import org.apache.http.HttpResponse
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.client.{ClientProtocolException, ResponseHandler}
@@ -71,32 +73,104 @@ object Application extends App {
         }
     }
 
-    implicit val ec: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(16))
-
-    def httpGet(httpClient: CloseableHttpClient, uri: String): Future[String] = {
+    def httpGet(uri: String)(implicit hc: CloseableHttpClient, ec: ExecutionContext): Future[String] = {
         Future {
-            httpClient.execute(new HttpGet(uri), respHandler)
+            hc.execute(new HttpGet(uri), respHandler)
         }
     }
 
-    val respBody = onHttpClientAsync(MAX_CONNECTIONS) { hc =>
+    implicit val ec: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(16))
+
+    val respBody = onHttpClientAsync(MAX_CONNECTIONS) { implicit httpClient =>
         Seq(
-            httpGet(hc, "http://ya.ru"),
-            httpGet(hc, "http://google.ru")
+            httpGet("http://ya.ru"),
+            httpGet("http://google.ru")
         )
     }
 
     /*
 
-    httpGet(hc, "...") { elPage =>
-        select(elPage, ".block") { elBlock =>
-            select(elBlock, "img[src]").text { imgSrc =>
-                resource(imgSrc)
-            )
+    val process = get("http://ya.ru") {
+        select(".block") {
+            val blockId = attr("id")
+            select("img[src]") {
+                val imgSrc = attr("src")
+                val imgId = attr("id")
+                get(imgSrc) {
+                    log(s"saving ${blockId}/${imgId}")
+                    toFile(s"C:/temp/${blockId}/${imgId}.png")
+                    // toOutputStream(s"${blockId}/${imgId}", buildOutputStream(blockId, imgId)).thenClose()
+                }
+            }
         )
+        select("#form-login") {
+            select("#name").setText("John")
+            select("#pass").setText("qwerty")
+            submit("#btnSubmit") {
+                val imgId = select("img[src]").attr("id")
+                toFile(s"C:/temp/form/${imgId}.png")
+            }
+        }
     }
 
+    get "http://ya.ru" - 200
+        select ".block" - 3 times
+        ---1
+            select "img[src]" - 2 times
+            ---1
+                get "http://ya.ru/img/logo1.png" - 200
+                    saving 1/1
+                    to file "C:/temp/block1/image1.png"
+            ---2
+                get "http://ya.ru/img/logo2.png" - 200
+                    saving 1/2
+                    to file "C:/temp/block1/image2.png"
+        ---2
+            select "img[src]" - 2 times
+            ---1
+                get "http://ya.ru/img/logo3.png" - 404
+            ---2
+                get "http://ya.ru/img/logo4.png" - 200
+                    saving 2/2
+                    to file "C:/temp/block2/image2.png"
+        ---3
+            exception - ...
+
+    get "http://ya.ru" - 200
+        select ".block" - 3 times
+        ---2
+            select "img[src]" - 2 times
+            ---1
+                get "http://ya.ru/img/logo3.png" - 404
+        ---3
+            exception - ...
+
      */
+
+    class Resource {
+
+        def getInputStream: InputStream = ???
+    }
+
+    class ToOutputStreamHandler(os: OutputStream, osFuture: Future[_]) {
+
+        def thenClose(): Unit = {
+            osFuture.onComplete { _ =>
+                os.close()
+            }
+        }
+    }
+
+    def toOutputStream(name: String, os: OutputStream)(implicit r: Resource, ec: ExecutionContext): ToOutputStreamHandler = {
+        val osFuture = Future {
+            IOUtils.copy(r.getInputStream, os)
+        }
+        new ToOutputStreamHandler(os, osFuture)
+    }
+
+    def toFile(path: String)(implicit r: Resource, ec: ExecutionContext): Unit = {
+        toOutputStream(path, new FileOutputStream(path))(r, ec).thenClose()
+    }
 
     Future.sequence(respBody).onComplete {
         case Success(value) => println(value)

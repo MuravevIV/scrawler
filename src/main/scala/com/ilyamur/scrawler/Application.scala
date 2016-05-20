@@ -32,19 +32,26 @@ object Application extends App {
         futures
     }
 
+    def createManager[A](maxConnections: Int): PoolingHttpClientConnectionManager = {
+        val manager = new PoolingHttpClientConnectionManager()
+        manager.setMaxTotal(maxConnections)
+        manager.setDefaultMaxPerRoute(maxConnections)
+        manager
+    }
+
+    def createHttpClient[A](manager: HttpClientConnectionManager): CloseableHttpClient = {
+        HttpClients.custom()
+                .setConnectionManager(manager)
+                .build()
+    }
+
     def onHttpClientConnectionManagerAsync[A](maxConnections: Int)(f: HttpClientConnectionManager => Seq[Future[A]]): Seq[Future[A]] = {
-        val cm = new PoolingHttpClientConnectionManager()
-        cm.setMaxTotal(maxConnections)
-        cm.setDefaultMaxPerRoute(maxConnections)
-        sequenceResourceUseReleaseAsync(cm)(f)(_.shutdown())
+        sequenceResourceUseReleaseAsync(createManager(maxConnections))(f)(_.shutdown())
     }
 
     def onHttpClientAsync[A](maxConnections: Int)(f: CloseableHttpClient => Seq[Future[A]]): Seq[Future[A]] = {
-        onHttpClientConnectionManagerAsync(maxConnections) { cm =>
-            val client = HttpClients.custom()
-                    .setConnectionManager(cm)
-                    .build()
-            sequenceResourceUseReleaseAsync(client)(f)(_.close())
+        onHttpClientConnectionManagerAsync(maxConnections) { manager =>
+            sequenceResourceUseReleaseAsync(createHttpClient(manager))(f)(_.close())
         }
     }
 
@@ -66,15 +73,30 @@ object Application extends App {
 
     implicit val ec: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(16))
 
-    val respBody = onHttpClientAsync(MAX_CONNECTIONS) { httpClient =>
-        val a = Future {
-            httpClient.execute(new HttpGet("http://ya.ru"), respHandler)
+    def httpGet(httpClient: CloseableHttpClient, uri: String): Future[String] = {
+        Future {
+            httpClient.execute(new HttpGet(uri), respHandler)
         }
-        val b = Future {
-            httpClient.execute(new HttpGet("http://google.ru"), respHandler)
-        }
-        Seq(a, b)
     }
+
+    val respBody = onHttpClientAsync(MAX_CONNECTIONS) { hc =>
+        Seq(
+            httpGet(hc, "http://ya.ru"),
+            httpGet(hc, "http://google.ru")
+        )
+    }
+
+    /*
+
+    httpGet(hc, "...") { elPage =>
+        select(elPage, ".block") { elBlock =>
+            select(elBlock, "img[src]").text { imgSrc =>
+                resource(imgSrc)
+            )
+        )
+    }
+
+     */
 
     Future.sequence(respBody).onComplete {
         case Success(value) => println(value)

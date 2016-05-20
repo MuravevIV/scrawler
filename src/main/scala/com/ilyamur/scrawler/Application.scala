@@ -1,5 +1,7 @@
 package com.ilyamur.scrawler
 
+import java.util.concurrent.Executors
+
 import org.apache.http.HttpResponse
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.client.{ClientProtocolException, ResponseHandler}
@@ -8,26 +10,43 @@ import org.apache.http.impl.client.{CloseableHttpClient, HttpClients}
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager
 import org.apache.http.util.EntityUtils
 
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
+
 object Application extends App {
 
     private val MAX_CONNECTIONS = 16
     private val URL = "http://ya.ru"
 
-    def getPoolingHttpClientConnectionManager(maxConnections: Int): HttpClientConnectionManager = {
+    def sequenceResourceUseReleaseAsync[R, A](r: R)(f: R => Seq[Future[A]])(c: R => Unit): Seq[Future[A]] = {
+        val futures = try {
+            f(r)
+        } catch {
+            case e: Exception =>
+                c(r)
+                throw e
+        }
+        Future.sequence(futures).onComplete { _ =>
+            c(r)
+        }
+        futures
+    }
+
+    def onHttpClientConnectionManagerAsync[A](maxConnections: Int)(f: HttpClientConnectionManager => Seq[Future[A]]): Seq[Future[A]] = {
         val cm = new PoolingHttpClientConnectionManager()
         cm.setMaxTotal(maxConnections)
         cm.setDefaultMaxPerRoute(maxConnections)
-        cm
+        sequenceResourceUseReleaseAsync(cm)(f)(_.shutdown())
     }
 
-    def getPoolingHttpClient(maxConnections: Int): CloseableHttpClient = {
-        val cm = getPoolingHttpClientConnectionManager(maxConnections)
-        HttpClients.custom()
-                .setConnectionManager(cm)
-                .build()
+    def onHttpClientAsync[A](maxConnections: Int)(f: CloseableHttpClient => Seq[Future[A]]): Seq[Future[A]] = {
+        onHttpClientConnectionManagerAsync(maxConnections) { cm =>
+            val client = HttpClients.custom()
+                    .setConnectionManager(cm)
+                    .build()
+            sequenceResourceUseReleaseAsync(client)(f)(_.close())
+        }
     }
-
-    val httpClient = getPoolingHttpClient(MAX_CONNECTIONS)
 
     val respHandler = new ResponseHandler[String] {
         override def handleResponse(resp: HttpResponse): String = {
@@ -45,9 +64,20 @@ object Application extends App {
         }
     }
 
-    val respBody = httpClient.execute(new HttpGet(URL), respHandler)
+    implicit val ec: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(16))
 
-    println(respBody)
-    println("")
-    println("ok")
+    val respBody = onHttpClientAsync(MAX_CONNECTIONS) { httpClient =>
+        val a = Future {
+            httpClient.execute(new HttpGet("http://ya.ru"), respHandler)
+        }
+        val b = Future {
+            httpClient.execute(new HttpGet("http://google.ru"), respHandler)
+        }
+        Seq(a, b)
+    }
+
+    Future.sequence(respBody).onComplete {
+        case Success(value) => println(value)
+        case Failure(e) => println("Error: " + e.getMessage)
+    }
 }

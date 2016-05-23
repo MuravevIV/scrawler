@@ -1,6 +1,8 @@
 package com.ilyamur.scrawler
 
 import java.io.{FileOutputStream, InputStream, OutputStream}
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
 import org.apache.commons.io.IOUtils
@@ -13,9 +15,10 @@ import org.apache.http.impl.conn.PoolingHttpClientConnectionManager
 import org.apache.http.util.EntityUtils
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.matching.Regex
 import scala.util.{Failure, Success}
 
-object Application extends App {
+object SApplication extends App {
 
     private val MAX_CONNECTIONS = 16
     private val URL = "http://ya.ru"
@@ -101,17 +104,44 @@ object Application extends App {
                     toFile(s"C:/temp/${blockId}/${imgId}.png")
                     // toOutputStream(s"${blockId}/${imgId}", buildOutputStream(blockId, imgId)).thenClose()
                 }
+                get(imgSrc, imgSrc) { case (ctx1, ctx2) =>
+                    // select("img") // error!
+                    ctx1.select.attr("img")
+                    ctx2.select.attr("img")
+                }
+                // alternatively
+                http(get(imgSrc), get(imgSrc)) { case (ctx1, ctx2) =>
+                    //
+                }
             }
         )
         select("#form-login") {
-            select("#name").setText("John")
-            select("#pass").setText("qwerty")
+            select("#name").setValue("John")
+            select("#pass").setValue("qwerty")
             submit("#btnSubmit") {
                 val imgId = select("img[src]").attr("id")
                 toFile(s"C:/temp/form/${imgId}.png")
             }
         }
     }
+
+    import com.ilyamur.scrawler._
+
+    get ("http://www.deviantart.com") {
+        select (".grid-dailydev .tt-a.thumb") {
+            """.+/(.+.jpg)""".r.findFirstMatchIn(attr("data-super-full-img")).foreach { m =>
+                val src = m.group(0)
+                val name = m.group(1)
+                get (src) {
+                    writeToFile("D:/dailydev/" + name)
+                }
+            }
+        }
+    }
+
+    get("http://www.deviantart.com", {
+        //
+    })
 
     get "http://ya.ru" - 200
         select ".block" - 3 times

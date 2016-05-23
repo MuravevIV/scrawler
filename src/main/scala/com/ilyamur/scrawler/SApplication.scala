@@ -1,8 +1,6 @@
 package com.ilyamur.scrawler
 
 import java.io.{FileOutputStream, InputStream, OutputStream}
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
 import org.apache.commons.io.IOUtils
@@ -15,7 +13,6 @@ import org.apache.http.impl.conn.PoolingHttpClientConnectionManager
 import org.apache.http.util.EntityUtils
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.matching.Regex
 import scala.util.{Failure, Success}
 
 object SApplication extends App {

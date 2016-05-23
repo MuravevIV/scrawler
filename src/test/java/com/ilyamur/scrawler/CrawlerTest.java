@@ -1,18 +1,22 @@
 package com.ilyamur.scrawler;
 
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import static org.powermock.api.mockito.PowerMockito.mock;
 
+import com.ui4j.api.browser.BrowserEngine;
+import com.ui4j.api.browser.Page;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.runners.Enclosed;
 import org.junit.runner.RunWith;
-import org.mockito.Spy;
+import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,48 +27,50 @@ public class CrawlerTest {
 
     private static final String ANY_URI = StringUtils.EMPTY;
 
-    private static final CurrentThreadExecutor CURRENT_THREAD_EXECUTOR = new CurrentThreadExecutor();
-
     @RunWith(MockitoJUnitRunner.class)
     public static class CrawlerTest_nonConfigured {
 
-        @Spy
-        private Crawler target;
-
         @Test(expected = NullPointerException.class)
-        public void get_whenNonConfigured_throwsConfigurationError() {
-
-            target.get(ANY_URI, documentContext -> {
-            });
+        public void build_whenMissingConfiguration_throwsConfigurationError() {
+            (new Crawler.Builder())
+                    .build();
         }
     }
 
     @RunWith(MockitoJUnitRunner.class)
     public static class CrawlerTest_configured {
 
-        @Spy
+        private final CurrentThreadExecutor currentThreadExecutor = spy(new CurrentThreadExecutor());
+
+        @Mock
+        private BrowserEngine browserEngine;
+
         private Crawler target;
 
         @Before
         public void before() {
-            prepareConfiguration();
+            Crawler crawler = (new Crawler.Builder())
+                    .setExecutionService(currentThreadExecutor)
+                    .build();
+            target = spy(crawler);
+            prepareBrowserEngine();
         }
 
-        private void prepareConfiguration() {
-            CrawlerConfiguration crawlerConfiguration = mock(CrawlerConfiguration.class);
-            when(crawlerConfiguration.getExecutionService()).thenReturn(CURRENT_THREAD_EXECUTOR);
-            target.setConfiguration(crawlerConfiguration);
+        private void prepareBrowserEngine() {
+            doReturn(browserEngine).when(target).getWebKit();
+            Page page = mock(Page.class);
+            doReturn(page).when(browserEngine).navigate(ANY_URI);
         }
 
         @Test
-        public void getConsumable_executes() {
+        public void getConsumer_executes() {
             AtomicBoolean atomicBoolean = new AtomicBoolean(false);
 
             target.get(ANY_URI, documentContext -> {
                 atomicBoolean.set(true);
             });
 
-            assertTrue("Get method should execute", atomicBoolean.get());
+            assertTrue("Get method should execute callback", atomicBoolean.get());
         }
 
         @Test
@@ -76,6 +82,24 @@ public class CrawlerTest {
 
             verify(target).get(eq(ANY_URI), any(Consumer.class));
             verify(runnable).run();
+        }
+
+        @Test
+        public void shutdown() {
+
+            target.get(ANY_URI, documentContext -> {
+            });
+            target.shutdown();
+
+            verify(currentThreadExecutor).shutdown();
+            verify(browserEngine).shutdown();
+        }
+
+        @Test
+        public void getDefault() {
+            Crawler crawler = Crawler.getDefault();
+
+            assertNotNull(crawler.executionService);
         }
     }
 }

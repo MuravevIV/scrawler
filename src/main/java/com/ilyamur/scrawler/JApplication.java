@@ -10,7 +10,7 @@ public class JApplication {
     }
 
     private void run() {
-        Crawler crawler = new Crawler();
+        Crawler crawler = Crawler.getDefault();
         crawler.get("http://www.deviantart.com", pageCtx -> {
             pageCtx.select(".grid-dailydev .tt-a.thumb", divCtx -> {
                 Matcher m = Pattern.compile(".+/(.+.jpg)").matcher(divCtx.attr("data-super-full-img"));
